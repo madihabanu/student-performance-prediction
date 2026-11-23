@@ -1,14 +1,14 @@
 import streamlit as st
 import pandas as pd
+from pathlib import Path
 
-GROUP_LETTER = {"Doing well": "A", "Needs attention": "B", "Needs support": "C"}
+DATA_DIR = Path(__file__).parent / "dataset"
 
-SAMPLE = pd.DataFrame({
-    "student_id": ["S01", "S02", "S03", "S04", "S05", "S06"],
-    "sem1": ["FCD", "FC", "Fail", "FC", "FCD", "SC"],
-    "sem2": ["FCD", "FC", "Fail", "FCD", "FC", "FC"],
-    "sem3": ["FCD", "FCD", "FC", "FCD", "FCD", "SC"],
-})
+@st.cache_data
+def load_semester_data():
+    return pd.read_csv(DATA_DIR / "semester_results_clean.csv")
+
+semester_df = load_semester_data()
 
 SCORE = {"FCD": 3, "FC": 2, "SC": 1, "Fail": 0}
 
@@ -28,21 +28,121 @@ page = st.sidebar.radio("Go to", ["Overview", "EDA", "Model Results", "Predict"]
 
 if page == "Overview":
     st.header("Overview")
-    st.write("This app estimates which students may be at risk of failing a semester, using their earlier semester results.")
-    st.info("Sample data for layout. Real data will be connected later.")
 
-    sem_cols = ["sem1", "sem2", "sem3"]
-    has_fail = (SAMPLE[sem_cols] == "Fail").any(axis=1)
+    st.write(
+        "An overview of student academic performance "
+        "based on previous semester results."
+    )
 
+    # Use all semester records
+    academic_df = semester_df.copy()
+
+    # Count unique students
+    total_students = academic_df["student_id"].nunique()
+
+    # Count semester records
+    total_records = len(academic_df)
+
+    # Identify students with at least one failed semester
+    student_risk = (
+        academic_df.groupby("student_id")["at_risk"]
+        .max()
+    )
+
+    students_at_risk = int(student_risk.sum())
+
+    risk_percentage = (
+        students_at_risk / total_students * 100
+    )
+
+    # Display metrics
     c1, c2, c3 = st.columns(3)
-    c1.metric("Students", len(SAMPLE))
-    c2.metric("With at least one Fail", int(has_fail.sum()))
-    c3.metric("Share with a Fail", f"{has_fail.mean():.0%}")
 
-    st.subheader("Sample records")
-    st.dataframe(SAMPLE)
+    c1.metric("Total Students", total_students)
+    c2.metric("Students At-Risk", students_at_risk)
+    c3.metric("At-Risk Percentage", f"{risk_percentage:.1f}%")
 
-    st.caption("All student data is anonymized. No names or USNs are stored or shown.")
+    result_counts = (
+    academic_df["result"]
+    .value_counts()
+    .rename_axis("Result")
+    .reset_index(name="Count")
+)
+
+    st.bar_chart(
+        result_counts,
+        x="Result",
+        y="Count",
+        x_label="Result Category",
+        y_label="Number of Records"
+ )
+
+    st.subheader("Student Academic Records")
+
+    with st.expander("View All Records"):
+
+        filtered_df = academic_df.copy()
+
+        # Student ID search
+        search_id = st.text_input(
+            "Search by Student ID",
+            placeholder="Enter Student ID"
+        )
+
+        if search_id:
+            filtered_df = filtered_df[
+                filtered_df["student_id"]
+                .astype(str)
+                .str.contains(search_id, case=False, na=False)
+            ]
+
+        # Semester filter
+        semesters = sorted(academic_df["semester_no"].dropna().unique())
+
+        selected_semester = st.selectbox(
+            "Filter by Semester",
+            ["All Semesters"] + semesters
+        )
+
+        if selected_semester != "All Semesters":
+            filtered_df = filtered_df[
+                filtered_df["semester_no"] == selected_semester
+            ]
+
+        # Result filter
+        results = sorted(academic_df["result"].dropna().unique())
+
+        selected_result = st.selectbox(
+            "Filter by Result",
+            ["All Results"] + results
+        )
+
+        if selected_result != "All Results":
+            filtered_df = filtered_df[
+                filtered_df["result"] == selected_result
+            ]
+
+        # Display filtered records
+        st.dataframe(
+            filtered_df,
+            use_container_width=True,
+            hide_index=True
+        )
+
+        st.caption(
+            f"Showing {len(filtered_df)} of {len(academic_df)} records"
+        )
+
+        # Download filtered records
+        csv = filtered_df.to_csv(index=False).encode("utf-8")
+
+        st.download_button(
+            label="Download Filtered Records",
+            data=csv,
+            file_name="filtered_student_records.csv",
+            mime="text/csv"
+        )
+        
 elif page == "EDA":
     st.header("EDA")
     st.write("Charts will go here.")
